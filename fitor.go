@@ -9,19 +9,19 @@ import (
 )
 
 type room struct {
-	Users []*OnlineUser
+	Users     []*OnlineUser
 	Broadcast chan Message
 }
 
 type Message struct {
-	Time time.Time
-	Nick string
+	Time    time.Time
+	Nick    string
 	Content string
 }
 
 var runningRoom *room = &room{}
 
-func (r *room) run () {
+func (r *room) run() {
 	for b := range r.Broadcast {
 		for _, u := range r.Users {
 			u.Send <- b
@@ -35,47 +35,47 @@ func (r *room) SendLine(line Message) {
 
 func InitRoom() {
 	runningRoom = &room{
-		Users: make([]*OnlineUser,0),
+		Users:     make([]*OnlineUser, 0),
 		Broadcast: make(chan Message),
 	}
 	go runningRoom.run()
 }
 
 type OnlineUser struct {
-     Connection *websocket.Conn
-     Send       chan Message
+	Connection *websocket.Conn
+	Send       chan Message
 }
 
 func (this *OnlineUser) PushToClient() {
-     for b := range this.Send {
-          err := websocket.JSON.Send(this.Connection, b)
-          if err != nil {
-               break
-          }
-     }
+	for b := range this.Send {
+		err := websocket.JSON.Send(this.Connection, b)
+		if err != nil {
+			break
+		}
+	}
 }
 
 func (this *OnlineUser) PullFromClient() {
-  for {
-    var content string
-    err := websocket.Message.Receive(this.Connection, &content)
-		
-    if err != nil {
-      return
-    }
+	for {
+		var content string
+		err := websocket.Message.Receive(this.Connection, &content)
+
+		if err != nil {
+			return
+		}
 		// don't actually do anything here. just keeping it open
-  }
+	}
 }
 
 func BuildConnection(ws *websocket.Conn) {
 	onlineUser := &OnlineUser{
-          Connection: ws,
-          Send:       make(chan Message, 256),
-     }
+		Connection: ws,
+		Send:       make(chan Message, 256),
+	}
 	runningRoom.Users = append(runningRoom.Users, onlineUser)
 	go onlineUser.PushToClient()
 	onlineUser.PullFromClient()
-	
+
 }
 
 func main() {
@@ -84,17 +84,17 @@ func main() {
 	c := irc.SimpleClient("gobot")
 
 	// Add handlers to do things here!
-	c.AddHandler("connected", func(conn *irc.Conn, line *irc.Line) { 
-		conn.Join("#ccnmtl") 
+	c.AddHandler("connected", func(conn *irc.Conn, line *irc.Line) {
+		conn.Join("#ccnmtl")
 	})
 	quit := make(chan bool)
-	c.AddHandler("disconnected", func(conn *irc.Conn, line *irc.Line) { 
-		quit <- true 
+	c.AddHandler("disconnected", func(conn *irc.Conn, line *irc.Line) {
+		quit <- true
 	})
 	c.AddHandler("PRIVMSG", func(conn *irc.Conn, line *irc.Line) {
 		msg := Message{line.Time, line.Nick, line.Args[1]}
 		runningRoom.SendLine(msg)
-  })
+	})
 
 	// Tell client to connect
 	if err := c.Connect("irc.freenode.net"); err != nil {
