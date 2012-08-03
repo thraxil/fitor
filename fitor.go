@@ -93,7 +93,6 @@ func main() {
 	})
 	c.AddHandler("PRIVMSG", func(conn *irc.Conn, line *irc.Line) {
 		msg := Message{line.Time, line.Nick, line.Args[1]}
-	  fmt.Printf("%s <%s> %s\n", line.Time, line.Nick, line.Args[1])
 		runningRoom.SendLine(msg)
   })
 
