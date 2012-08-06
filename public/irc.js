@@ -39,7 +39,7 @@ $(function() {
 	              minutes = "0" + minutes
             }
             entry.append("<div class='span1 timestamp'>" + hours + ":" + minutes + "</div>");
-					  entry.append("<div class='span1 nick'>&lt;" + data.Nick + "&gt;</div>");
+					  entry.append("<div class='span2 nick'>&lt;" + data.Nick + "&gt;</div>");
 					  entry.append("<div class='span10 ircmessage'>" + data.Content + "</div>");
 	          appendLog(entry);
     }
@@ -52,6 +52,20 @@ $(function() {
             d.scrollTop = d.scrollHeight - d.clientHeight;
         }
 	  }
+
+
+    $("#msg_form").submit(function() {
+				var msg = $("#appendedPrependedInput");
+				if (!conn) {
+			  		return false;
+				}
+				if (!msg.val()) {
+			  		return false;
+				}
+				conn.send(msg.val());
+				msg.val("");
+				return false
+			});
 
 	  if (window["WebSocket"]) {
         connectSocket();

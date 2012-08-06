@@ -11,12 +11,19 @@ import (
 type room struct {
 	Users     []*OnlineUser
 	Broadcast chan Message
+	Incoming chan IncomingMessage
 }
 
 type Message struct {
 	Time    time.Time
 	Nick    string
 	Content string
+}
+
+type IncomingMessage struct {
+	Type string
+	Content string
+	Nick string
 }
 
 var runningRoom *room = &room{}
@@ -37,6 +44,7 @@ func InitRoom() {
 	runningRoom = &room{
 		Users:     make([]*OnlineUser, 0),
 		Broadcast: make(chan Message),
+		Incoming: make(chan IncomingMessage),
 	}
 	go runningRoom.run()
 }
@@ -63,7 +71,10 @@ func (this *OnlineUser) PullFromClient() {
 		if err != nil {
 			return
 		}
-		// don't actually do anything here. just keeping it open
+		runningRoom.Incoming <- IncomingMessage{"msg",content,""}
+		// need to echo back to ourself
+		msg := Message{time.Now(), "gobot", content}
+		runningRoom.SendLine(msg)
 	}
 }
 
@@ -74,8 +85,9 @@ func BuildConnection(ws *websocket.Conn) {
 	}
 	runningRoom.Users = append(runningRoom.Users, onlineUser)
 	go onlineUser.PushToClient()
+	runningRoom.Incoming <- IncomingMessage{"notice","[new web user online]",""}
 	onlineUser.PullFromClient()
-
+	runningRoom.Incoming <- IncomingMessage{"notice","[web user disconnected]",""}
 }
 
 func main() {
@@ -86,6 +98,15 @@ func main() {
 	// Add handlers to do things here!
 	c.AddHandler("connected", func(conn *irc.Conn, line *irc.Line) {
 		conn.Join("#ccnmtl")
+		go func() {
+			for msg := range runningRoom.Incoming {
+				if msg.Type == "msg" {
+					conn.Privmsg("#ccnmtl", msg.Content)
+				} else if msg.Type == "notice" {
+					conn.Notice("#ccnmtl", msg.Content)
+				}
+			}
+		}()
 	})
 	quit := make(chan bool)
 	c.AddHandler("disconnected", func(conn *irc.Conn, line *irc.Line) {
@@ -124,17 +145,20 @@ func Home(w http.ResponseWriter, r *http.Request) {
     <link href="/public/stylesheets/bootstrap.css" rel="stylesheet">
     <link href="/public/stylesheets/main.css" rel="stylesheet">
     <script src="/public/javascripts/jquery-1.7.2.min.js"></script>
-    <style>
-      body {
-        padding-top: 60px; /* 60px to make the container go all the way to the bottom of the topbar */
-      }
-    </style>
 </head>
 <body>
 					 <h1>Our IRC channel</h1>
 					 <p>(you may have to wait for someone to post something)</p>
 
 	<div id="log"></div>
+
+<div id="input-box" class="span8">
+<form id="msg_form" class="form-horizontal post-form">
+<div class="input-append">
+<input class="span7" id="appendedPrependedInput" size="16" type="text"><input type="submit" class="btn" value="Post" />
+</div>
+</form>
+</div>
 
 		<script src="/public/irc.js"></script>
 <script src="/public/javascripts/bootstrap.js"></script>
