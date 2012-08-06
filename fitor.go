@@ -11,7 +11,7 @@ import (
 type room struct {
 	Users     []*OnlineUser
 	Broadcast chan Message
-	Incoming chan IncomingMessage
+	Incoming  chan IncomingMessage
 }
 
 type Message struct {
@@ -21,9 +21,9 @@ type Message struct {
 }
 
 type IncomingMessage struct {
-	Type string
+	Type    string
 	Content string
-	Nick string
+	Nick    string
 }
 
 var runningRoom *room = &room{}
@@ -44,7 +44,7 @@ func InitRoom() {
 	runningRoom = &room{
 		Users:     make([]*OnlineUser, 0),
 		Broadcast: make(chan Message),
-		Incoming: make(chan IncomingMessage),
+		Incoming:  make(chan IncomingMessage),
 	}
 	go runningRoom.run()
 }
@@ -71,7 +71,7 @@ func (this *OnlineUser) PullFromClient() {
 		if err != nil {
 			return
 		}
-		runningRoom.Incoming <- IncomingMessage{"msg",content,""}
+		runningRoom.Incoming <- IncomingMessage{"msg", content, ""}
 		// need to echo back to ourself
 		msg := Message{time.Now(), "gobot", content}
 		runningRoom.SendLine(msg)
@@ -85,9 +85,9 @@ func BuildConnection(ws *websocket.Conn) {
 	}
 	runningRoom.Users = append(runningRoom.Users, onlineUser)
 	go onlineUser.PushToClient()
-	runningRoom.Incoming <- IncomingMessage{"notice","[new web user online]",""}
+	runningRoom.Incoming <- IncomingMessage{"notice", "[new web user online]", ""}
 	onlineUser.PullFromClient()
-	runningRoom.Incoming <- IncomingMessage{"notice","[web user disconnected]",""}
+	runningRoom.Incoming <- IncomingMessage{"notice", "[web user disconnected]", ""}
 }
 
 func main() {
