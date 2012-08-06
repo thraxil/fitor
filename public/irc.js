@@ -22,9 +22,15 @@ $(function() {
 					  var entry = $("<div/>");
             entry.addClass("row");
             var d = new Date(Date.parse(data.Time));
-            entry.append("<div class='span2 timestamp'>" + d.getHours() + ":" + d.getMinutes() + "</div>");
-					  entry.append("<div class='span1 nick'>" + data.Nick + "</div>");
-					  entry.append("<div class='span9 ircmessage'>" + data.Content + "</div>");
+            var hours = d.getHours()
+	          var minutes = d.getMinutes()
+
+	          if (minutes < 10) {
+	              minutes = "0" + minutes
+            }
+            entry.append("<div class='span1 timestamp'>" + hours + ":" + minutes + "</div>");
+					  entry.append("<div class='span1 nick'>&lt;" + data.Nick + "&gt;</div>");
+					  entry.append("<div class='span10 ircmessage'>" + data.Content + "</div>");
 	          appendLog(entry);
 	      }
 	  } else {
