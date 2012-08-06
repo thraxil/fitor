@@ -9,7 +9,7 @@ import (
 )
 
 type room struct {
-	Users     []*OnlineUser
+	Users     map[*OnlineUser]bool
 	Broadcast chan Message
 	Incoming  chan IncomingMessage
 }
@@ -30,7 +30,7 @@ var runningRoom *room = &room{}
 
 func (r *room) run() {
 	for b := range r.Broadcast {
-		for _, u := range r.Users {
+		for u := range r.Users {
 			u.Send <- b
 		}
 	}
@@ -42,7 +42,7 @@ func (r *room) SendLine(line Message) {
 
 func InitRoom() {
 	runningRoom = &room{
-		Users:     make([]*OnlineUser, 0),
+		Users:     make(map[*OnlineUser]bool),
 		Broadcast: make(chan Message),
 		Incoming:  make(chan IncomingMessage),
 	}
@@ -83,11 +83,12 @@ func BuildConnection(ws *websocket.Conn) {
 		Connection: ws,
 		Send:       make(chan Message, 256),
 	}
-	runningRoom.Users = append(runningRoom.Users, onlineUser)
+	runningRoom.Users[onlineUser] = true
 	go onlineUser.PushToClient()
 	runningRoom.Incoming <- IncomingMessage{"notice", "[new web user online]", ""}
 	onlineUser.PullFromClient()
 	runningRoom.Incoming <- IncomingMessage{"notice", "[web user disconnected]", ""}
+	delete(runningRoom.Users,onlineUser)
 }
 
 func main() {

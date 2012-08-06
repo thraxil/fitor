@@ -13,7 +13,7 @@ $(function() {
         if (currentRefresh > maxRefresh) {
             currentRefresh = maxRefresh;
         }
-        appendLog($("<div><b>Connection closed. trying again in " + currentRefresh/1000 + " seconds</b></div>"));
+        appendLog($("<div class='alert'><b>Connection closed. trying again in " + currentRefresh/1000 + " seconds</b></div>"));
         setTimeout(connectSocket,currentRefresh);
     };
 
@@ -23,7 +23,7 @@ $(function() {
 	      conn.onmessage = onMessage;
         conn.onopen = function (evt) {
             currentRefresh = defaultRefresh;
-            appendLog($("<div><b>Connected to server.</b></div>"));
+            appendLog($("<div class='alert alert-info'><b>Connected to server.</b></div>"));
         };
     };
 
