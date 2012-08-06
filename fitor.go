@@ -51,6 +51,7 @@ func InitRoom() {
 
 type OnlineUser struct {
 	Connection *websocket.Conn
+	Nick       string
 	Send       chan Message
 }
 
@@ -71,23 +72,25 @@ func (this *OnlineUser) PullFromClient() {
 		if err != nil {
 			return
 		}
-		runningRoom.Incoming <- IncomingMessage{"msg", content, ""}
+		runningRoom.Incoming <- IncomingMessage{"msg", content, this.Nick}
 		// need to echo back to ourself
-		msg := Message{time.Now(), "gobot", content}
+		msg := Message{time.Now(), this.Nick, content}
 		runningRoom.SendLine(msg)
 	}
 }
 
 func BuildConnection(ws *websocket.Conn) {
+	nick := ws.Request().URL.Query().Get("nick")
 	onlineUser := &OnlineUser{
 		Connection: ws,
+		Nick:       nick,
 		Send:       make(chan Message, 256),
 	}
 	runningRoom.Users[onlineUser] = true
 	go onlineUser.PushToClient()
-	runningRoom.Incoming <- IncomingMessage{"notice", "[new web user online]", ""}
+	runningRoom.Incoming <- IncomingMessage{"notice", "joined as web user", nick}
 	onlineUser.PullFromClient()
-	runningRoom.Incoming <- IncomingMessage{"notice", "[web user disconnected]", ""}
+	runningRoom.Incoming <- IncomingMessage{"notice", "web user disconnected", nick}
 	delete(runningRoom.Users,onlineUser)
 }
 
@@ -102,9 +105,9 @@ func main() {
 		go func() {
 			for msg := range runningRoom.Incoming {
 				if msg.Type == "msg" {
-					conn.Privmsg("#ccnmtl", msg.Content)
+					conn.Privmsg("#ccnmtl", msg.Nick + ": " + msg.Content)
 				} else if msg.Type == "notice" {
-					conn.Notice("#ccnmtl", msg.Content)
+					conn.Notice("#ccnmtl", msg.Nick + ": " + msg.Content)
 				}
 			}
 		}()

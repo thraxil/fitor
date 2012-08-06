@@ -6,6 +6,8 @@ $(function() {
     var defaultRefresh = 1000;
     var maxRefresh = 1000 * 5 * 60; // 5 minutes
 
+    window.nick = "";
+
     var requestFailed = function(evt) {
         // circuit breaker pattern for failed requests
         // to ease up on the server when it's having trouble
@@ -18,7 +20,10 @@ $(function() {
     };
 
     var connectSocket = function() {
-    	  conn = new WebSocket("ws://behemoth.ccnmtl.columbia.edu:5050/socket/");
+        while (window.nick === null || window.nick === "") {
+            window.nick = prompt("Please enter a nick");
+        }
+    	  conn = new WebSocket("ws://behemoth.ccnmtl.columbia.edu:5050/socket/?nick=" + window.nick);
 	      conn.onclose = requestFailed;
 	      conn.onmessage = onMessage;
         conn.onopen = function (evt) {
