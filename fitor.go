@@ -1,10 +1,14 @@
 package main
 
 import (
+	"crypto/hmac"
+	"crypto/sha1"
 	"code.google.com/p/go.net/websocket"
 	"fmt"
 	irc "github.com/fluffle/goirc/client"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -80,10 +84,53 @@ func (this *OnlineUser) PullFromClient() {
 }
 
 func BuildConnection(ws *websocket.Conn) {
-	nick := ws.Request().URL.Query().Get("nick")
+	token := ws.Request().URL.Query().Get("token")
+
+	// token will look something like this:
+	// anp8:1344361884:667494:127.0.0.1:306233f64522f1f970fc62fb3cf2d7320c899851
+	parts := strings.Split(token, ":")
+	if len(parts) != 5 {
+		fmt.Println("invalid token")
+		return
+	}
+	// their UNI
+	uni := parts[0]
+	// UNIX timestamp
+	now, err := strconv.Atoi(parts[1])
+	if err != nil {
+		fmt.Printf("invalid timestamp in token")
+		return
+	}
+	// a random salt 
+	salt := parts[2]
+	ip_address := parts[3]
+	// the hmac of those parts with our shared secret
+	hmc := parts[4]
+
+	// make sure we're within a 60 second window
+	current_time := time.Now()
+	token_time := time.Unix(int64(now),0)
+	if current_time.Sub(token_time) > time.Duration(60 * time.Second) {
+		fmt.Printf("stale token\n")
+		fmt.Printf("%s %s\n", current_time, token_time)
+		return
+	}
+	// TODO: check that their ip address matches
+
+	// check that the HMAC matches
+	h := hmac.New(
+		sha1.New,
+		[]byte("6f1d916c-7761-4874-8d5b-8f8f93d20bf2"))
+	h.Write([]byte(fmt.Sprintf("%s:%d:%s:%s",uni,now,salt,ip_address)))
+	sum := fmt.Sprintf("%x", h.Sum(nil))
+	if sum != hmc {
+		fmt.Println("token HMAC doesn't match")
+		return
+	}
+	
 	onlineUser := &OnlineUser{
 		Connection: ws,
-		Nick:       nick,
+		Nick:       uni,
 		Send:       make(chan Message, 256),
 	}
 	runningRoom.Users[onlineUser] = true
