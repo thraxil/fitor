@@ -1,220 +1,110 @@
-package main
+package main 
+
+/* just an IRC <-> 0MQ bridge */
 
 import (
-	"crypto/hmac"
-	"crypto/sha1"
-	"code.google.com/p/go.net/websocket"
+	"encoding/json"
 	"fmt"
 	irc "github.com/fluffle/goirc/client"
-	"net/http"
-	"strconv"
-	"strings"
-	"time"
+	zmq "github.com/alecthomas/gozmq"
 )
 
-type room struct {
-	Users     map[*OnlineUser]bool
-	Broadcast chan Message
-	Incoming  chan IncomingMessage
-}
+var PUB_KEY = "gobot"
+var NICK = "gobot"
+var CHANNEL = "#ccnmtl"
+
+var PUB_SOCKET = "tcp://*:5556"
+var SUB_SOCKET = "tcp://localhost:5557"
 
 type Message struct {
-	Time    time.Time
-	Nick    string
-	Content string
+	MessageType string `json:"message_type"`
+	Nick        string `json:"nick"`
+	Content     string `json:"content"`
 }
 
-type IncomingMessage struct {
-	Type    string
-	Content string
-	Nick    string
+func receiveZmqMessage(subsocket zmq.Socket, m *Message) error {
+		// using zmq multi-part messages which will arrive
+		// in pairs. the first of which we don't care about so we discard.
+		_, _ = subsocket.Recv(0)
+    content, _ := subsocket.Recv(0)
+		return json.Unmarshal([]byte(content), m)
 }
 
-var runningRoom *room = &room{}
-
-func (r *room) run() {
-	for b := range r.Broadcast {
-		for u := range r.Users {
-			u.Send <- b
-		}
-	}
-}
-
-func (r *room) SendLine(line Message) {
-	r.Broadcast <- line
-}
-
-func InitRoom() {
-	runningRoom = &room{
-		Users:     make(map[*OnlineUser]bool),
-		Broadcast: make(chan Message),
-		Incoming:  make(chan IncomingMessage),
-	}
-	go runningRoom.run()
-}
-
-type OnlineUser struct {
-	Connection *websocket.Conn
-	Nick       string
-	Send       chan Message
-}
-
-func (this *OnlineUser) PushToClient() {
-	for b := range this.Send {
-		err := websocket.JSON.Send(this.Connection, b)
-		if err != nil {
-			break
-		}
-	}
-}
-
-func (this *OnlineUser) PullFromClient() {
+// listen on a zmq SUB socket and forward messages
+// to the IRC connection
+func zmqToIrcLoop(conn *irc.Conn, subsocket zmq.Socket) {
+	var m Message
 	for {
-		var content string
-		err := websocket.Message.Receive(this.Connection, &content)
-
+		err := receiveZmqMessage(subsocket, &m)
 		if err != nil {
-			return
+			// just ignore any invalid messages
+			continue
 		}
-		runningRoom.Incoming <- IncomingMessage{"msg", content, this.Nick}
-		// need to echo back to ourself
-		msg := Message{time.Now(), this.Nick, content}
-		runningRoom.SendLine(msg)
+		if m.MessageType != "message" {
+			conn.Privmsg(CHANNEL, "[" + m.Content + "]")
+		} else {
+			ircmessage := fmt.Sprintf("%s: %s", m.Nick, m.Content)
+			conn.Privmsg(CHANNEL, ircmessage)
+		}
 	}
 }
 
-func BuildConnection(ws *websocket.Conn) {
-	token := ws.Request().URL.Query().Get("token")
+// send a message to the zmq PUB socket
+func sendMessage(pubsocket zmq.Socket, m Message) {
+	b, _ := json.Marshal(m)
+	pubsocket.SendMultipart([][]byte{[]byte(PUB_KEY),b},0)
+}
 
-	// token will look something like this:
-	// anp8:1344361884:667494:127.0.0.1:306233f64522f1f970fc62fb3cf2d7320c899851
-	parts := strings.Split(token, ":")
-	if len(parts) != 5 {
-		fmt.Println("invalid token")
-		return
-	}
-	// their UNI
-	uni := parts[0]
-	// UNIX timestamp
-	now, err := strconv.Atoi(parts[1])
-	if err != nil {
-		fmt.Printf("invalid timestamp in token")
-		return
-	}
-	// a random salt 
-	salt := parts[2]
-	ip_address := parts[3]
-	// the hmac of those parts with our shared secret
-	hmc := parts[4]
-
-	// make sure we're within a 60 second window
-	current_time := time.Now()
-	token_time := time.Unix(int64(now),0)
-	if current_time.Sub(token_time) > time.Duration(60 * time.Second) {
-		fmt.Printf("stale token\n")
-		fmt.Printf("%s %s\n", current_time, token_time)
-		return
-	}
-	// TODO: check that their ip address matches
-
-	// check that the HMAC matches
-	h := hmac.New(
-		sha1.New,
-		[]byte("6f1d916c-7761-4874-8d5b-8f8f93d20bf2"))
-	h.Write([]byte(fmt.Sprintf("%s:%d:%s:%s",uni,now,salt,ip_address)))
-	sum := fmt.Sprintf("%x", h.Sum(nil))
-	if sum != hmc {
-		fmt.Println("token HMAC doesn't match")
-		return
-	}
-	
-	onlineUser := &OnlineUser{
-		Connection: ws,
-		Nick:       uni,
-		Send:       make(chan Message, 256),
-	}
-	runningRoom.Users[onlineUser] = true
-	go onlineUser.PushToClient()
-	runningRoom.Incoming <- IncomingMessage{"notice", "joined as web user", nick}
-	onlineUser.PullFromClient()
-	runningRoom.Incoming <- IncomingMessage{"notice", "web user disconnected", nick}
-	delete(runningRoom.Users,onlineUser)
+func statusMessage(content string) Message {
+		return Message{
+			MessageType: "status",
+			Nick: NICK,
+			Content: content,
+		}
 }
 
 func main() {
-	InitRoom()
+	// prepare our zmq sockets
+	context, _ := zmq.NewContext()
+  pubsocket, _ := context.NewSocket(zmq.PUB)
+  subsocket, _ := context.NewSocket(zmq.SUB)
+  defer context.Close()
+  defer pubsocket.Close()
+  defer subsocket.Close()
+  pubsocket.Bind(PUB_SOCKET)
+	subsocket.SetSockOptString(zmq.SUBSCRIBE, PUB_KEY)
+  subsocket.Connect(SUB_SOCKET)
 
-	c := irc.SimpleClient("gobot")
+	// configure our IRC client
+	c := irc.SimpleClient(NICK)
 
-	// Add handlers to do things here!
+	// most of the functionality is arranged by adding handlers
 	c.AddHandler("connected", func(conn *irc.Conn, line *irc.Line) {
-		conn.Join("#ccnmtl")
-		go func() {
-			for msg := range runningRoom.Incoming {
-				if msg.Type == "msg" {
-					conn.Privmsg("#ccnmtl", msg.Nick + ": " + msg.Content)
-				} else if msg.Type == "notice" {
-					conn.Notice("#ccnmtl", msg.Nick + ": " + msg.Content)
-				}
-			}
-		}()
+		conn.Join(CHANNEL)
+		sendMessage(pubsocket, statusMessage("joined " + CHANNEL))
+		// spawn a goroutine that will do the ZMQ -> IRC bridge
+		go zmqToIrcLoop(conn, subsocket)
 	})
+
 	quit := make(chan bool)
 	c.AddHandler("disconnected", func(conn *irc.Conn, line *irc.Line) {
+		sendMessage(pubsocket, statusMessage("disconnected"))
 		quit <- true
 	})
+	// this is the handler that gets triggered whenever someone posts
+	// in the channel
 	c.AddHandler("PRIVMSG", func(conn *irc.Conn, line *irc.Line) {
-		msg := Message{line.Time, line.Nick, line.Args[1]}
-		runningRoom.SendLine(msg)
+		// forward messages from IRC -> zmq PUB socket
+		sendMessage(pubsocket, Message{"message",line.Nick,line.Args[1]})
 	})
 
-	// Tell client to connect
+	// Now we can connect
 	if err := c.Connect("irc.freenode.net"); err != nil {
+		sendMessage(pubsocket, statusMessage("error connecting: " + err.Error()))
 		fmt.Printf("Connection error: %s\n", err.Error())
-	}
-
-	http.HandleFunc("/", Home)
-	http.Handle("/socket/", websocket.Handler(BuildConnection))
-	http.HandleFunc("/public/", assetsHandler)
-	err := http.ListenAndServe(":5050", nil)
-	if err != nil {
-		panic("ListenAndServe: " + err.Error())
 	}
 
 	// Wait for disconnect
 	<-quit
 }
 
-func assetsHandler(w http.ResponseWriter, r *http.Request) {
-	http.ServeFile(w, r, r.URL.Path[len("/"):])
-}
-
-func Home(w http.ResponseWriter, r *http.Request) {
-	page := `
-<html>
-<head><title>IRC websocket test</title>
-    <link href="/public/stylesheets/bootstrap.css" rel="stylesheet">
-    <link href="/public/stylesheets/main.css" rel="stylesheet">
-    <script src="/public/javascripts/jquery-1.7.2.min.js"></script>
-</head>
-<body>
-					 <h1>Our IRC channel</h1>
-					 <p>(you may have to wait for someone to post something)</p>
-
-	<div id="log"></div>
-
-<div id="input-box" class="span8">
-<form id="msg_form" class="form-horizontal post-form">
-<div class="input-append">
-<input class="span7" id="appendedPrependedInput" size="16" type="text"><input type="submit" class="btn" value="Post" />
-</div>
-</form>
-</div>
-
-		<script src="/public/irc.js"></script>
-<script src="/public/javascripts/bootstrap.js"></script>
-</body>
-</html>
-`
-	w.Write([]byte(page))
-}
